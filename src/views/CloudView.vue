@@ -24,10 +24,10 @@ const confirmClear = ref(false)
 let clearTimer = null
 const qrSrc = ref('')
 
-// 二维码指向的输入页地址：当前站点根路径 + /input
+// 二维码指向的输入页地址：当前页面路径（去掉 index.html）+ #/input（hash 路由）
 const qrTarget = computed(() => {
-  const base = import.meta.env.BASE_URL || '/'
-  return `${location.origin}${base}input`
+  const dir = location.pathname.replace(/[^/]*$/, '')
+  return `${location.origin}${dir}#/input`
 })
 
 onMounted(async () => {
