@@ -1,0 +1,228 @@
+/* ===== 全局基础样式（复刻「同频 · 课堂词云」参考版视觉） ===== */
+
+:root {
+  --bg: #f5f6f2;
+  --paper: #fff;
+  --ink: #172c27;
+  --muted: #7b8983;
+  --line: #e7ebe6;
+  --green: #176b54;
+  --lime: #dff36b;
+  --coral: #f18a72;
+  --blue: #7a9ce2;
+  --purple: #aa8cdb;
+  --yellow: #e6b83f;
+  --danger: #c05f47;
+  --shadow: 0 14px 42px #1e39220b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'DM Sans', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: var(--green);
+}
+
+/* ---- 通用小组件 ---- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.brandmark {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--green);
+  display: grid;
+  place-items: center;
+  color: var(--lime);
+  font-size: 17px;
+  flex: none;
+}
+
+.brand small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  margin-top: 1px;
+}
+
+.panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  margin: 7px 0 22px;
+}
+
+.label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 17px 0 8px;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fafbf8;
+  border-radius: 10px;
+  padding: 12px 13px;
+  outline: none;
+  color: var(--ink);
+  font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field:focus {
+  border-color: #77a38f;
+  box-shadow: 0 0 0 3px #176b5410;
+}
+
+.primary {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+  padding: 13px;
+  margin-top: 18px;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.primary:hover:not(:disabled) {
+  background: #105740;
+  transform: translateY(-1px);
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.secondary {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.secondary:hover {
+  background: #f2f5f1;
+  border-color: #d5ddd7;
+}
+
+.divide {
+  height: 1px;
+  background: var(--line);
+  margin: 20px 0;
+}
+
+.tip {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 12px;
+}
+
+.subtle {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- 顶部状态徽标 ---- */
+
+.live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.live .dot {
+  height: 7px;
+  width: 7px;
+  border-radius: 50%;
+}
+
+.live.idle {
+  background: #eef1ed;
+  color: #7b8983;
+}
+
+.live.idle .dot {
+  background: #b6c2bc;
+}
+
+.live.running {
+  background: #e8f2ea;
+  color: #29734f;
+}
+
+.live.running .dot {
+  background: #47b777;
+  box-shadow: 0 0 0 3px #47b77720;
+}
+
+.live.stopped {
+  background: #fdf0ec;
+  color: var(--danger);
+}
+
+.live.stopped .dot {
+  background: var(--coral);
+  box-shadow: 0 0 0 3px #f18a7220;
+}
