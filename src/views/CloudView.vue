@@ -10,6 +10,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import QRCode from 'qrcode'
 import WordCloudBoard from '../components/WordCloudBoard.vue'
 import {
+  getRoom,
   phase,
   phaseLabel,
   entries,
@@ -24,10 +25,11 @@ const confirmClear = ref(false)
 let clearTimer = null
 const qrSrc = ref('')
 
-// 二维码指向的输入页地址：当前页面路径（去掉 index.html）+ #/input（hash 路由）
+// 二维码指向的输入页地址：当前页面路径 + #/input?room=课堂码（hash 路由）
+// 学生扫码后凭 room 连到同一条消息通道，晚加入也能回放拿到最新状态
 const qrTarget = computed(() => {
   const dir = location.pathname.replace(/[^/]*$/, '')
-  return `${location.origin}${dir}#/input`
+  return `${location.origin}${dir}#/input?room=${getRoom()}`
 })
 
 onMounted(async () => {
