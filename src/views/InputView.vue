@@ -29,10 +29,15 @@ function removeWord(index) {
   words.value.splice(index, 1)
 }
 
-function submit() {
-  const res = addEntry(name.value, words.value)
+const submitting = ref(false)
+
+async function submit() {
+  if (submitting.value) return // 防重复点击
+  submitting.value = true
+  const res = await addEntry(name.value, words.value)
+  submitting.value = false
   if (!res.ok) {
-    errorMsg.value = res.message
+    errorMsg.value = res.message || '提交失败，请稍后再试'
     return
   }
   errorMsg.value = ''
@@ -116,7 +121,9 @@ function again() {
 
         <div class="err">{{ errorMsg }}</div>
 
-        <button type="submit" class="primary" :disabled="!canSubmit">提交词云 ↗</button>
+        <button type="submit" class="primary" :disabled="!canSubmit || submitting">
+          {{ submitting ? '提交中…' : '提交词云 ↗' }}
+        </button>
         <div class="tip">已添加 {{ words.length }} 个词 · 点击「添加」可继续加入，提交后自动去重。</div>
       </form>
     </section>

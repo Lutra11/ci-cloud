@@ -1,25 +1,18 @@
 /**
- * 课堂词云全局状态
+ * 课堂词云全局状态（后端同步版）
  *
- * 同步机制（三层）：
- *  1. BroadcastChannel —— 同一浏览器不同标签页实时同步（本地开发 / 双屏模式）
- *  2. ntfy.sh 公共消息服务 —— 跨设备同步（教师大屏 ↔ 学生手机）：
- *     - 教师页（/cloud）生成课堂码 room，二维码地址携带 ?room=xxx
- *     - 所有页面订阅同一个主题 cicloud-<room>（SSE，since=all 回放最新状态）
- *     - 教师：开始/停止/清空 → 广播 phase 消息；学生：提交 → 广播 entry 消息
- *  3. localStorage（仅教师页）—— 课堂码与课堂状态持久化，教师刷新页面不丢数据、
- *     二维码不变；学生端不持久化，扫一次码拿一次最新状态。
+ * 数据源是公网后端（server.js，部署于 Codespace）：
+ *  - GET  /api/state   页面打开时拉一次当前课堂状态（含历史词）
+ *  - GET  /api/events   SSE 实时通道：state（开始/停止/清空）与 entry（新提交）
+ *  - POST /api/input    学生提交词 {name, ciyu:[...]}
+ *  - POST /api/start|stop|clear   教师操作
  *
- * 状态结构：
- *  room    : 课堂码（6 位），师生凭它连到同一条消息通道
- *  round   : 轮次，清空时 +1，旧轮次的提交一律丢弃
- *  phase   : 'idle' | 'running' | 'stopped' —— 未开始 / 收集中 / 已停止
- *  entries : [{ id, name, words[], createdAt }]
+ * 所有设备（教师大屏 + 学生手机）都直接连后端，天然跨设备实时同步。
+ * API 地址在构建时通过 VITE_API_BASE 注入；缺省 localhost 用于本地开发。
  */
 import { reactive, computed } from 'vue'
 
-const CHANNEL_NAME = 'ci-cloud-sync'
-const NTFY = 'https://ntfy.sh'
+const API = import.meta.env.VITE_API_BASE || 'http://localhost:3000'
 
 export const PHASES = {
   IDLE: 'idle',
@@ -27,194 +20,92 @@ export const PHASES = {
   STOPPED: 'stopped'
 }
 
-// 每个标签页唯一身份，避免处理自己发出的消息
-const tabId =
-  typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-
-// ---- 课堂码 ----
-function randomRoom() {
-  let s = ''
-  while (s.length < 6) s += Math.random().toString(36).slice(2, 8)
-  return s.slice(0, 6)
-}
-function roomFromUrl() {
-  const m = location.hash.match(/[?&]room=([A-Za-z0-9]+)/)
-  return m ? m[1] : ''
-}
-// /cloud（含根路径重定向）= 教师端；/input = 学生端
-const isTeacher = !/#\/input\b/.test(location.hash)
-
-// 教师：课堂码固定存 localStorage（刷新不变，学生手里的二维码不失效）
-// 学生：从二维码 URL 里取课堂码；直接手输网址没带码时用默认演示码
-const room = isTeacher
-  ? localStorage.getItem('ci-cloud-room') || randomRoom()
-  : roomFromUrl() || 'demo'
-if (isTeacher) localStorage.setItem('ci-cloud-room', room)
-
-const TOPIC = `cicloud-${room}`
-const STORE_KEY = `ci-cloud-state-${room}`
-
 const state = reactive({
-  room,
-  round: 0,
   phase: PHASES.IDLE,
+  round: 0,
   startedAt: null,
   stoppedAt: null,
   entries: []
 })
 
-// ---- 本地持久化（仅教师页：刷新后课堂码、状态、词都不丢）----
-function persist() {
-  if (!isTeacher) return
-  try {
-    localStorage.setItem(
-      STORE_KEY,
-      JSON.stringify({
-        round: state.round,
-        phase: state.phase,
-        startedAt: state.startedAt,
-        stoppedAt: state.stoppedAt,
-        entries: state.entries
-      })
-    )
-  } catch {
-    /* 存储失败忽略 */
-  }
-}
-if (isTeacher) {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
-    if (saved && typeof saved === 'object') applyLocal(saved)
-  } catch {
-    /* 忽略损坏的存档 */
-  }
-}
-function applyLocal(next) {
-  if (!next || typeof next !== 'object') return
+// ---- 状态应用（幂等：同一状态重复应用无副作用）----
+function applyState(s) {
+  if (!s || typeof s !== 'object') return
   state.phase =
-    next.phase === PHASES.RUNNING || next.phase === PHASES.STOPPED ? next.phase : PHASES.IDLE
-  state.startedAt = next.startedAt ?? null
-  state.stoppedAt = next.stoppedAt ?? null
-  state.entries = Array.isArray(next.entries) ? next.entries : []
-  state.round = Number(next.round) || 0
+    s.phase === PHASES.RUNNING || s.phase === PHASES.STOPPED ? s.phase : PHASES.IDLE
+  state.round = Number(s.round) || 0
+  state.startedAt = s.startedAt ?? null
+  state.stoppedAt = s.stoppedAt ?? null
+  state.entries = Array.isArray(s.entries) ? s.entries : []
 }
 
-// ---- 同浏览器标签页同步（BroadcastChannel）----
-let channel = null
-try {
-  channel = new BroadcastChannel(CHANNEL_NAME)
-} catch {
-  channel = null
-}
-
-function sendLocal(msg) {
-  if (channel) {
-    try {
-      channel.postMessage(msg)
-    } catch {
-      /* 忽略广播失败 */
-    }
+function pushEntry(entry, round) {
+  if (
+    entry &&
+    entry.id &&
+    Number(round) === state.round &&
+    !state.entries.some((x) => x.id === entry.id)
+  ) {
+    state.entries.push(entry)
   }
 }
 
-if (channel) {
-  channel.onmessage = (e) => {
-    const d = e.data
-    if (!d || typeof d !== 'object') return
-    if (d.type === 'state') {
-      applyLocal(d.state)
-    } else if (d.type === 'request-state' && d.from !== tabId) {
-      sendLocal({ type: 'state', state: snapshot() })
-    }
-  }
-}
-// 本标签页加载后向其他标签页要一份当前快照（仅同浏览器；跨设备走 ntfy 回放）
-sendLocal({ type: 'request-state', from: tabId })
-
-// ---- 跨设备同步（ntfy.sh）----
-function remoteSend(payload) {
+async function post(path, body) {
   try {
-    fetch(NTFY, {
+    const r = await fetch(`${API}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // 注意：ntfy 的 JSON 发布格式必须 POST 到根 URL，topic 放 body 里；
-      // 若 POST 到 /<topic> 且带 JSON body，整个 body 会被当成纯文本消息（双层嵌套）
-      body: JSON.stringify({
-        topic: TOPIC,
-        message: JSON.stringify({ ...payload, from: tabId })
-      })
-    }).catch(() => {
-      /* 离线/网络失败忽略 */
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+    return await r.json()
+  } catch {
+    return { ok: false, message: '网络异常，请稍后再试' }
+  }
+}
+
+// ---- 启动：拉一次状态 + 订阅 SSE ----
+async function bootstrap() {
+  try {
+    const r = await fetch(`${API}/api/state`)
+    applyState(await r.json())
+  } catch {
+    /* 后端暂不可达：保持未开始，SSE 会自动重连 */
+  }
+  try {
+    const es = new EventSource(`${API}/api/events`)
+    es.addEventListener('state', (ev) => {
+      try {
+        applyState(JSON.parse(ev.data))
+      } catch {
+        /* 非 JSON 忽略 */
+      }
+    })
+    es.addEventListener('entry', (ev) => {
+      try {
+        const d = JSON.parse(ev.data)
+        pushEntry(d.entry, d.round)
+      } catch {
+        /* 非 JSON 忽略 */
+      }
     })
   } catch {
-    /* 忽略 */
+    /* 浏览器不支持 EventSource：靠下面轮询兜底 */
   }
-}
 
-function handleRemote(p) {
-  if (!p || typeof p !== 'object' || p.from === tabId) return
-  if (p.t === 'phase') {
-    state.phase =
-      p.phase === PHASES.RUNNING || p.phase === PHASES.STOPPED ? p.phase : PHASES.IDLE
-    // 轮次变化说明教师清空过，旧词全部作废
-    if (Number(p.round) !== state.round) {
-      state.round = Number(p.round) || 0
-      state.entries = []
-    }
-    state.startedAt = p.startedAt ?? null
-    state.stoppedAt = p.stoppedAt ?? null
-    persist()
-  } else if (p.t === 'entry') {
-    const entry = p.entry
-    if (
-      Number(p.round) === state.round &&
-      entry &&
-      entry.id &&
-      !state.entries.some((x) => x.id === entry.id)
-    ) {
-      state.entries.push(entry)
-      persist()
-    }
-  }
-}
-
-// 订阅消息通道；since=all 让晚加入的手机回放拿到最新课堂状态
-try {
-  const es = new EventSource(`${NTFY}/${TOPIC}/sse?since=all`)
-  es.onmessage = (ev) => {
+  // 低频兜底轮询：只在阶段与当前不一致时应用，避免覆盖刚收到的 SSE 新词
+  setInterval(async () => {
     try {
-      const env = JSON.parse(ev.data)
-      if (env.event !== 'message' || !env.message) return
-      handleRemote(JSON.parse(env.message))
+      const r = await fetch(`${API}/api/state`)
+      const d = await r.json()
+      if (d && d.phase && d.phase !== state.phase) applyState(d)
     } catch {
-      /* 非 JSON 消息忽略 */
+      /* 忽略 */
     }
-  }
-} catch {
-  /* 不支持 EventSource 时退化为本地模式 */
+  }, 30 * 1000)
 }
-
-// ---- 工具 ----
-function snapshot() {
-  return JSON.parse(JSON.stringify(state))
-}
-
-function phasePayload() {
-  return {
-    t: 'phase',
-    round: state.round,
-    phase: state.phase,
-    startedAt: state.startedAt,
-    stoppedAt: state.stoppedAt
-  }
-}
+bootstrap()
 
 // ---- 只读派生状态 ----
-export function getRoom() {
-  return state.room
-}
 export const phase = computed(() => state.phase)
 export const entries = computed(() => state.entries)
 export const isRunning = computed(() => state.phase === PHASES.RUNNING)
@@ -228,42 +119,39 @@ export const phaseLabel = computed(() => {
 // ---- 操作方法 ----
 
 /** 点击「开始」：开放输入（只有 running 状态下 /input 才允许提交） */
-export function startSession() {
+export async function startSession() {
+  // 乐观更新：点击立即生效，随后 POST / SSE 校准
   state.phase = PHASES.RUNNING
   state.startedAt = Date.now()
   state.stoppedAt = null
-  sendLocal({ type: 'state', state: snapshot() })
-  remoteSend(phasePayload())
-  persist()
+  const d = await post('/api/start')
+  if (d && d.phase) applyState(d)
 }
 
 /** 点击「停止」：关闭输入 */
-export function stopSession() {
+export async function stopSession() {
   state.phase = PHASES.STOPPED
   state.stoppedAt = Date.now()
-  sendLocal({ type: 'state', state: snapshot() })
-  remoteSend(phasePayload())
-  persist()
+  const d = await post('/api/stop')
+  if (d && d.phase) applyState(d)
 }
 
-/** 点击「清空」：清空本轮全部词，轮次 +1（旧轮次的在途提交会被丢弃），回到未开始 */
-export function clearSession() {
+/** 点击「清空」：清空本轮全部词，轮次 +1（旧轮次在途提交会被丢弃），回到未开始 */
+export async function clearSession() {
   state.phase = PHASES.IDLE
   state.startedAt = null
   state.stoppedAt = null
   state.entries = []
-  state.round = state.round + 1
-  sendLocal({ type: 'state', state: snapshot() })
-  remoteSend(phasePayload())
-  persist()
+  state.round += 1
+  const d = await post('/api/clear')
+  if (d && d.phase) applyState(d)
 }
 
 /**
  * 提交一条词：{ name, words[] }
- * 仅在 running 状态允许提交，词会自动去重、去空白。
- * 学生手机上的提交通过消息通道实时送到教师大屏。
+ * 先本地校验给即时反馈，再 POST 到后端；失败返回 { ok:false, message }。
  */
-export function addEntry(name, words) {
+export async function addEntry(name, words) {
   const cleanName = String(name ?? '').trim()
   const cleanWords = [...new Set((words || []).map((w) => String(w).trim()).filter(Boolean))]
   if (state.phase !== PHASES.RUNNING) {
@@ -271,20 +159,12 @@ export function addEntry(name, words) {
   }
   if (!cleanName) return { ok: false, message: '请先填写姓名' }
   if (!cleanWords.length) return { ok: false, message: '请至少添加一个词' }
-  const entry = {
-    id:
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    name: cleanName,
-    words: cleanWords,
-    createdAt: Date.now()
+
+  const d = await post('/api/input', { name: cleanName, ciyu: cleanWords })
+  if (d && d.ok && d.entry) {
+    pushEntry(d.entry, state.round)
   }
-  state.entries.push(entry)
-  sendLocal({ type: 'state', state: snapshot() })
-  remoteSend({ t: 'entry', round: state.round, entry })
-  persist()
-  return { ok: true }
+  return { ok: !!(d && d.ok), message: (d && d.message) || '' }
 }
 
 // ---- 词云数据 ----
