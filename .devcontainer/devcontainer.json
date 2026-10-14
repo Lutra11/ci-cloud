@@ -7,7 +7,7 @@
     }
   },
   "forwardPorts": [3000],
-  "postStartCommand": "nohup node server.js > server.log 2>&1 & sleep 2 && tail -1 server.log",
+  "postStartCommand": "setsid nohup node server.js > server.log 2>&1 < /dev/null & sleep 2 && tail -1 server.log",
   "portsAttributes": {
     "3000": {
       "label": "ci-cloud API",

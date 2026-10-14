@@ -206,7 +206,7 @@ server.listen(PORT, '0.0.0.0', () => {
 })
 
 // 优雅退出
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     console.log(`\n${sig} received, closing…`)
     server.close(() => process.exit(0))
